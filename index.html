@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Nexus Chat • Firebase</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0b0b0e">
+  <link rel="icon" href="icons/icon-192.png" sizes="192x192">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+
+  <style>
+    :root{--bg:#0b0b0e;--panel:#121216;--muted:#8e8e93;--gold:#c7a24b}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:#f2f2f2}
+    header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #222;background:var(--panel);position:sticky;top:0;z-index:10}
+    header h1{font-size:16px;margin:0}
+    #user{display:flex;gap:8px;align-items:center}
+    #user img{width:28px;height:28px;border-radius:50%}
+    #installBtn{display:none;margin-right:8px}
+
+    main{display:flex;flex-direction:column;height:calc(100vh - 132px)}
+    #messages{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+    .msg{max-width:78%;padding:10px 12px;border-radius:12px;background:#16161a;border:1px solid #1f1f27}
+    .me{align-self:flex-end;background:#1f1f27;border-color:#2a2a34}
+    .meta{font-size:12px;opacity:.75;margin-bottom:4px}
+    .bubble-text{white-space:pre-wrap;word-wrap:break-word}
+    .bubble-img{display:block;max-width:60vw;max-height:40vh;border-radius:10px;border:1px solid #2a2a34}
+    .thumb{cursor:pointer}
+
+    form{display:flex;gap:8px;padding:12px;border-top:1px solid #222;background:var(--panel);flex-wrap:wrap}
+    #msgInput{flex:1;min-width:160px;padding:10px;border:1px solid #333;background:#141416;color:#fff;border-radius:8px}
+    .controls{display:flex;gap:8px;align-items:center}
+    button{padding:10px 14px;border:0;border-radius:8px;background:var(--gold);color:#0b0b0e;font-weight:600;cursor:pointer}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    #file{display:none}
+    .fileLabel{padding:10px 14px;border:1px dashed #444;border-radius:8px;color:#ddd;cursor:pointer}
+    .progress{font-size:12px;color:var(--muted)}
+
+    dialog#preview{border:0;border-radius:12px;padding:0;max-width:92vw}
+    .preview-wrap{background:#0f0f13;padding:10px;border-radius:12px}
+    .preview-wrap img{max-width:90vw;max-height:70vh;display:block;border-radius:10px}
+    .preview-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;color:#ddd}
+    .link{color:#b3d4ff;text-decoration:underline;cursor:pointer}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>💬 Nexus Chat</h1>
+    <div id="user">
+      <button id="installBtn">Instalar</button>
+      <img id="avatar" alt="" />
+      <span id="username"></span>
+      <button id="signInBtn">Entrar con Google</button>
+      <button id="signOutBtn" style="display:none">Salir</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="messages" aria-live="polite"></section>
+  </main>
+
+  <form id="msgForm" autocomplete="off">
+    <input id="msgInput" type="text" placeholder="Escribe un mensaje..." />
+    <div class="controls">
+      <label class="fileLabel" for="file">📎 Imagen</label>
+      <input id="file" type="file" accept="image/*">
+      <span class="progress" id="progressText"></span>
+      <button id="sendBtn" type="submit" disabled>Enviar</button>
+    </div>
+  </form>
+
+  <!-- Vista previa modal -->
+  <dialog id="preview">
+    <div class="preview-wrap">
+      <div class="preview-head">
+        <strong>Vista previa</strong>
+        <button id="closePreview">Cerrar</button>
+      </div>
+      <img id="previewImg" alt="Imagen">
+      <div style="padding:6px 2px">
+        <a id="openOriginal" class="link" target="_blank" rel="noopener">Abrir original</a>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Firebase CDN v11 (modular) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+    import {
+      getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+    import {
+      getFirestore, collection, addDoc, serverTimestamp,
+      query, orderBy, limit, onSnapshot
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+    import {
+      getStorage, ref as sRef, uploadBytesResumable, getDownloadURL
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-storage.js";
+
+    // --- Tu configuración (ajustada storageBucket correcto) ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyCp23981tPx3DsXvPyK4ZeAfkFPb3pL6pU",
+      authDomain: "nexus-chat-7e32b.firebaseapp.com",
+      projectId: "nexus-chat-7e32b",
+      storageBucket: "nexus-chat-7e32b.appspot.com",
+      messagingSenderId: "780849892655",
+      appId: "1:780849892655:web:b329ad45dffb7931f3a5da"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const storage = getStorage(app);
+    const provider = new GoogleAuthProvider();
+
+    // UI refs
+    const signInBtn = document.getElementById('signInBtn');
+    const signOutBtn = document.getElementById('signOutBtn');
+    const username = document.getElementById('username');
+    const avatar = document.getElementById('avatar');
+    const messagesEl = document.getElementById('messages');
+    const form = document.getElementById('msgForm');
+    const input = document.getElementById('msgInput');
+    const fileInput = document.getElementById('file');
+    const sendBtn = document.getElementById('sendBtn');
+    const progressText = document.getElementById('progressText');
+
+    const previewDlg = document.getElementById('preview');
+    const previewImg = document.getElementById('previewImg');
+    const closePreview = document.getElementById('closePreview');
+    const openOriginal = document.getElementById('openOriginal');
+
+    const ROOM_ID = "global";
+    const msgsRef = collection(db, "rooms", ROOM_ID, "messages");
+
+    // Auth
+    signInBtn.addEventListener('click', () => signInWithPopup(auth, provider));
+    signOutBtn.addEventListener('click', () => signOut(auth));
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        username.textContent = user.displayName || user.email;
+        avatar.src = user.photoURL || '';
+        avatar.style.display = user.photoURL ? 'block' : 'none';
+        signInBtn.style.display = 'none';
+        signOutBtn.style.display = 'inline-block';
+        sendBtn.disabled = false;
+      } else {
+        username.textContent = '';
+        avatar.src = '';
+        avatar.style.display = 'none';
+        signInBtn.style.display = 'inline-block';
+        signOutBtn.style.display = 'none';
+        sendBtn.disabled = true;
+      }
+    });
+
+    // Mensajes en tiempo real
+    const q = query(msgsRef, orderBy('createdAt', 'asc'), limit(300));
+    onSnapshot(q, (snapshot) => {
+      messagesEl.innerHTML = '';
+      const me = auth.currentUser?.uid;
+      snapshot.forEach(doc => {
+        const m = doc.data();
+        const bubble = document.createElement('div');
+        bubble.className = 'msg' + (m.uid === me ? ' me' : '');
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = m.name || 'Anónimo';
+        bubble.appendChild(meta);
+
+        if (m.text) {
+          const t = document.createElement('div');
+          t.className = 'bubble-text';
+          t.textContent = m.text;
+          bubble.appendChild(t);
+        }
+
+        if (m.imageURL) {
+          const img = document.createElement('img');
+          img.src = m.imageURL;
+          img.alt = m.imageName || 'Imagen';
+          img.className = 'bubble-img thumb';
+          img.addEventListener('click', () => openPreview(m.imageURL));
+          bubble.appendChild(img);
+        }
+
+        messagesEl.appendChild(bubble);
+      });
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
+
+    // Enviar: texto y/o imagen
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const user = auth.currentUser;
+      if (!user) return alert('Inicia sesión');
+
+      const text = input.value.trim();
+      const file = fileInput.files?.[0];
+
+      let imageURL = null, imageName = null, storagePath = null;
+
+      if (file) {
+        const maxMB = 5;
+        if (!file.type.startsWith('image/')) return alert('Solo imágenes.');
+        if (file.size > maxMB * 1024 * 1024) return alert(`Máx ${maxMB}MB.`);
+
+        imageName = `${Date.now()}_${file.name.replace(/\s+/g,'_')}`;
+        storagePath = `uploads/${user.uid}/${imageName}`;
+        const imgRef = sRef(storage, storagePath);
+
+        const task = uploadBytesResumable(imgRef, file, { contentType: file.type });
+        progressText.textContent = 'Subiendo… 0%';
+        await new Promise((resolve, reject) => {
+          task.on('state_changed', (snap) => {
+            const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+            progressText.textContent = `Subiendo… ${pct}%`;
+          }, reject, resolve);
+        });
+        imageURL = await getDownloadURL(task.snapshot.ref);
+        progressText.textContent = '';
+        fileInput.value = '';
+      }
+
+      if (!text && !imageURL) return;
+
+      await addDoc(msgsRef, {
+        text: text || null,
+        uid: user.uid,
+        name: user.displayName || user.email,
+        createdAt: serverTimestamp(),
+        imageURL: imageURL || null,
+        imageName: imageName || null,
+        storagePath: storagePath || null
+      });
+
+      input.value = '';
+      input.focus();
+    });
+
+    // Vista previa
+    function openPreview(url){
+      previewImg.src = url;
+      openOriginal.href = url;
+      previewDlg.showModal();
+    }
+    closePreview.addEventListener('click', ()=> previewDlg.close());
+
+    // PWA
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js');
+    }
+
+    let deferredPrompt = null;
+    const installBtn = document.getElementById('installBtn');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installBtn.style.display = 'inline-block';
+    });
+
+    installBtn.addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      deferredPrompt = null;
+      installBtn.style.display = 'none';
+    });
+
+    window.addEventListener('appinstalled', () => {
+      installBtn.style.display = 'none';
+    });
+  </script>
+</body>
+</html>
