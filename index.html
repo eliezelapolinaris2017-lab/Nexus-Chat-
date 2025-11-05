@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Chat Firebase + Google Auth</title>
+  <style>
+    body{margin:0;font-family:system-ui,Arial,sans-serif;background:#0b0b0e;color:#f2f2f2}
+    header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #222}
+    header h1{font-size:18px;margin:0}
+    #user{display:flex;gap:8px;align-items:center}
+    #user img{width:28px;height:28px;border-radius:50%}
+
+    #messages{height:65vh;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+    .msg{max-width:70%;padding:10px 12px;border-radius:10px;background:#16161a}
+    .me{align-self:flex-end;background:#1f1f27}
+    .meta{font-size:12px;opacity:.7;margin-bottom:4px}
+    form{display:flex;gap:8px;padding:12px;border-top:1px solid #222}
+    input[type="text"]{flex:1;padding:10px;border:1px solid #333;background:#141416;color:#fff;border-radius:8px}
+    button{padding:10px 14px;border:0;border-radius:8px;background:#c7a24b;color:#0b0b0e;font-weight:600;cursor:pointer}
+    button:disabled{opacity:.5;cursor:not-allowed}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Chat • Firebase</h1>
+    <div id="user">
+      <img id="avatar" alt="" />
+      <span id="username"></span>
+      <button id="signInBtn">Entrar con Google</button>
+      <button id="signOutBtn" style="display:none">Salir</button>
+    </div>
+  </header>
+
+  <main id="messages"></main>
+
+  <form id="msgForm">
+    <input id="msgInput" type="text" placeholder="Escribe un mensaje..." autocomplete="off"/>
+    <button id="sendBtn" type="submit" disabled>Enviar</button>
+  </form>
+
+  <!-- Firebase CDN (v11+ modular) -->
+  <script type="module">
+    // ----- IMPORTS -----
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+    import {
+      getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+    import {
+      getFirestore, collection, addDoc, serverTimestamp,
+      query, orderBy, limit, onSnapshot
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+    import {
+      getDatabase, ref, onDisconnect, set, serverTimestamp as rtdbTs
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js";
+
+    // ----- TU CONFIG -----
+    const firebaseConfig = {
+      apiKey: "TU_API_KEY",
+      authDomain: "TU_PROYECTO.firebaseapp.com",
+      projectId: "TU_PROYECTO",
+      storageBucket: "TU_PROYECTO.appspot.com",
+      messagingSenderId: "XXXXXXXXXXXX",
+      appId: "1:XXXXXXXXXXXX:web:XXXXXXXXXXXXXX",
+      databaseURL: "https://TU_PROYECTO-default-rtdb.firebaseio.com"
+    };
+
+    // ----- INIT -----
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const rtdb = getDatabase(app);
+    const provider = new GoogleAuthProvider();
+
+    // ----- UI -----
+    const signInBtn = document.getElementById('signInBtn');
+    const signOutBtn = document.getElementById('signOutBtn');
+    const username = document.getElementById('username');
+    const avatar = document.getElementById('avatar');
+    const messagesEl = document.getElementById('messages');
+    const form = document.getElementById('msgForm');
+    const input = document.getElementById('msgInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    const ROOM_ID = "global"; // cámbialo si usas múltiples salas
+    const msgsRef = collection(db, "rooms", ROOM_ID, "messages");
+
+    // ----- AUTH -----
+    signInBtn.addEventListener('click', () => signInWithPopup(auth, provider));
+    signOutBtn.addEventListener('click', () => signOut(auth));
+
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        username.textContent = user.displayName || user.email;
+        avatar.src = user.photoURL || '';
+        avatar.style.display = user.photoURL ? 'block' : 'none';
+        signInBtn.style.display = 'none';
+        signOutBtn.style.display = 'inline-block';
+        sendBtn.disabled = false;
+        form.style.display = 'flex';
+
+        // Presencia (opcional)
+        const statusRef = ref(rtdb, `status/${user.uid}`);
+        const isOnline = { state: 'online', last_changed: rtdbTs() };
+        const isOffline = { state: 'offline', last_changed: rtdbTs() };
+        await set(statusRef, isOnline);
+        onDisconnect(statusRef).set(isOffline);
+      } else {
+        username.textContent = '';
+        avatar.src = '';
+        avatar.style.display = 'none';
+        signInBtn.style.display = 'inline-block';
+        signOutBtn.style.display = 'none';
+        sendBtn.disabled = true;
+      }
+    });
+
+    // ----- LECTURA EN TIEMPO REAL -----
+    const q = query(msgsRef, orderBy('createdAt', 'asc'), limit(200));
+    onSnapshot(q, (snapshot) => {
+      messagesEl.innerHTML = '';
+      const me = auth.currentUser?.uid;
+      snapshot.forEach(doc => {
+        const m = doc.data();
+        const wrapper = document.createElement('div');
+        wrapper.className = 'msg' + (m.uid === me ? ' me' : '');
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = `${m.name || 'Anónimo'}`;
+        const text = document.createElement('div');
+        text.textContent = m.text;
+        wrapper.appendChild(meta);
+        wrapper.appendChild(text);
+        messagesEl.appendChild(wrapper);
+      });
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
+
+    // ----- ENVIAR MENSAJE -----
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const user = auth.currentUser;
+      if (!user) return alert('Inicia sesión');
+
+      const text = input.value.trim();
+      if (!text) return;
+
+      await addDoc(msgsRef, {
+        text,
+        uid: user.uid,
+        name: user.displayName || user.email,
+        photoURL: user.photoURL || null,
+        createdAt: serverTimestamp()
+      });
+
+      input.value = '';
+      input.focus();
+    });
+  </script>
+</body>
+</html>
