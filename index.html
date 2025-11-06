@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Nexus Chat • Firebase</title>
+  <style>
+    :root{--bg:#0b0b0e;--panel:#121216;--gold:#c7a24b;--muted:#9aa0a6}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:#f2f2f2}
+    header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #222;background:var(--panel)}
+    h1{font-size:16px;margin:0}
+    #user{display:flex;gap:8px;align-items:center}
+    #user img{width:28px;height:28px;border-radius:50%;display:none}
+    .bar{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid #222;background:#111117}
+    .bar input{flex:1;min-width:180px;padding:8px;border:1px solid #333;background:#141416;color:#fff;border-radius:8px}
+    .bar button{padding:8px 12px;border:0;border-radius:8px;background:var(--gold);color:#000;font-weight:600;cursor:pointer}
+    .pill{font-size:12px;color:var(--muted)}
+    main{height:calc(100vh - 200px);overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+    .msg{max-width:75%;padding:10px 12px;border-radius:10px;background:#1c1c21;position:relative}
+    .me{align-self:flex-end;background:#212129}
+    .meta{font-size:12px;opacity:.8;margin-bottom:4px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+    .edited{font-size:11px;color:var(--muted)}
+    .actions{display:flex;gap:4px}
+    .btn-icon{background:transparent;border:0;color:#bbb;cursor:pointer;padding:2px 6px;border-radius:6px}
+    .btn-icon:hover{color:#fff;background:#2a2a2f}
+    form.msgform{display:flex;gap:8px;padding:12px;border-top:1px solid #222;background:var(--panel)}
+    form.msgform input{flex:1;padding:10px;border:1px solid #333;background:#141416;color:#fff;border-radius:8px}
+    form.msgform button{padding:10px 14px;border:0;border-radius:8px;background:var(--gold);color:#000;font-weight:600;cursor:pointer}
+    .member-list{padding:8px 12px;font-size:13px;color:#ddd}
+    .member-item{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed #23232a}
+    .member-item button{background:#2a2a2f;color:#ddd;border:0;border-radius:6px;padding:4px 8px;cursor:pointer}
+    .member-item button:hover{background:#3a3a44}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>💬 Nexus Chat</h1>
+    <div id="user">
+      <img id="avatar" alt="">
+      <span id="username"></span>
+      <button id="signInBtn">Entrar con Google</button>
+      <button id="signOutBtn" style="display:none">Salir</button>
+    </div>
+  </header>
+
+  <!-- Barra de miembros / invitaciones -->
+  <div class="bar" id="memberBar" style="display:none">
+    <span class="pill" id="rolePill">Sala: global • Rol: —</span>
+    <input id="inviteEmail" type="email" placeholder="Añadir miembro (email)"/>
+    <button id="inviteBtn">Añadir</button>
+    <button id="toggleMembers">Ver miembros</button>
+  </div>
+  <div id="membersWrap" class="member-list" style="display:none"></div>
+
+  <main id="messages" aria-live="polite"></main>
+
+  <form class="msgform" id="msgForm" autocomplete="off">
+    <input id="msgInput" type="text" placeholder="Escribe un mensaje...">
+    <button id="sendBtn" type="submit" disabled>Enviar</button>
+  </form>
+
+  <!-- Firebase v11 -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+    import {
+      getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, limit,
+      doc, updateDoc, deleteDoc, setDoc, getDoc, getDocs
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+
+    // --- TU CONFIG ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyCp23981tPx3DsXvPyK4ZeAfkFPb3pL6pU",
+      authDomain: "nexus-chat-7e32b.firebaseapp.com",
+      projectId: "nexus-chat-7e32b",
+      storageBucket: "nexus-chat-7e32b.appspot.com",
+      messagingSenderId: "780849892655",
+      appId: "1:780849892655:web:b329ad45dffb7931f3a5da"
+    };
+
+    // --- Init ---
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+    const db = getFirestore(app);
+
+    // --- UI refs ---
+    const signInBtn = document.getElementById('signInBtn');
+    const signOutBtn = document.getElementById('signOutBtn');
+    const avatar = document.getElementById('avatar');
+    const username = document.getElementById('username');
+    const messagesEl = document.getElementById('messages');
+    const form = document.getElementById('msgForm');
+    const input = document.getElementById('msgInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    const memberBar = document.getElementById('memberBar');
+    const inviteEmail = document.getElementById('inviteEmail');
+    const inviteBtn = document.getElementById('inviteBtn');
+    const toggleMembers = document.getElementById('toggleMembers');
+    const membersWrap = document.getElementById('membersWrap');
+    const rolePill = document.getElementById('rolePill');
+
+    // --- Sala y colecciones ---
+    const ROOM_ID = 'global';
+    const msgsRef = collection(db, 'rooms', ROOM_ID, 'messages');
+    const membersRef = collection(db, 'rooms', ROOM_ID, 'members');
+
+    // --- Helpers ---
+    const emailId = (email) => email.toLowerCase().replace(/\./g, ','); // id seguro
+    let isOwner = false;
+    let isMember = false;
+
+    // --- Auth ---
+    signInBtn.onclick = () => signInWithPopup(auth, provider);
+    signOutBtn.onclick = () => signOut(auth);
+
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        signInBtn.style.display = 'none';
+        signOutBtn.style.display = 'inline-block';
+        avatar.src = user.photoURL || '';
+        avatar.style.display = user.photoURL ? 'inline-block' : 'none';
+        username.textContent = user.displayName || user.email;
+        sendBtn.disabled = false;
+        memberBar.style.display = 'flex';
+
+        await ensureFirstOwner(user);     // si no hay miembros, te hace owner
+        await refreshRole(user);          // calcula isOwner/isMember y actualiza UI
+        subscribeMembersList();           // escucha miembros para el panel
+        startChatStream();                // render mensajes
+
+      } else {
+        signInBtn.style.display = 'inline-block';
+        signOutBtn.style.display = 'none';
+        avatar.style.display = 'none';
+        username.textContent = '';
+        sendBtn.disabled = true;
+        memberBar.style.display = 'none';
+        membersWrap.style.display = 'none';
+        messagesEl.innerHTML = '';
+      }
+    });
+
+    async function ensureFirstOwner(user){
+      // Si la colección members está vacía, crea al usuario actual como owner
+      const snapshot = await getDocs(membersRef);
+      if (snapshot.empty) {
+        await setDoc(doc(db, 'rooms', ROOM_ID, 'members', emailId(user.email)), {
+          email: user.email,
+          name: user.displayName || user.email,
+          createdAt: serverTimestamp(),
+          owner: true
+        });
+      }
+    }
+
+    async function refreshRole(user){
+      const meDoc = await getDoc(doc(db, 'rooms', ROOM_ID, 'members', emailId(user.email)));
+      isMember = meDoc.exists();
+      isOwner = meDoc.exists() && meDoc.data().owner === true;
+      rolePill.textContent = `Sala: ${ROOM_ID} • Rol: ${isOwner ? 'Owner' : (isMember ? 'Miembro' : 'Invitado (sin acceso)')}`;
+      // Bloquea envío si no es miembro
+      sendBtn.disabled = !isMember;
+      input.disabled = !isMember;
+      inviteEmail.disabled = !isOwner;
+      inviteBtn.disabled = !isOwner;
+    }
+
+    // --- Gestionar miembros ---
+    inviteBtn.onclick = async () => {
+      const email = inviteEmail.value.trim().toLowerCase();
+      if (!email) return;
+      if (!isOwner) return alert('Solo el owner puede añadir miembros.');
+      try {
+        await setDoc(doc(db, 'rooms', ROOM_ID, 'members', emailId(email)), {
+          email,
+          name: email,
+          createdAt: serverTimestamp(),
+          owner: false
+        });
+        inviteEmail.value = '';
+        alert('Miembro añadido.');
+      } catch (e) {
+        console.error(e);
+        alert('No se pudo añadir: ' + (e?.message || e));
+      }
+    };
+
+    toggleMembers.onclick = () => {
+      membersWrap.style.display = membersWrap.style.display === 'none' ? 'block' : 'none';
+    };
+
+    function subscribeMembersList(){
+      onSnapshot(membersRef, (snap) => {
+        let html = '<strong>Miembros</strong>';
+        snap.forEach(d => {
+          const m = d.data();
+          const row = document.createElement('div');
+          row.className = 'member-item';
+          row.innerHTML = `
+            <span>${m.name || m.email} ${m.owner ? ' • Owner' : ''}</span>
+            ${isOwner && !m.owner ? '<button data-id="'+d.id+'">Quitar</button>' : ''}
+          `;
+          membersWrap.appendChild(row);
+        });
+
+        // Limpiar y re-render
+        membersWrap.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        const title = document.createElement('div');
+        title.style.marginBottom = '6px';
+        title.innerHTML = '<strong>Miembros</strong>';
+        frag.appendChild(title);
+
+        snap.forEach(d => {
+          const m = d.data();
+          const row = document.createElement('div');
+          row.className = 'member-item';
+          row.innerHTML = `
+            <span>${m.name || m.email} ${m.owner ? ' • Owner' : ''}</span>
+            ${isOwner && !m.owner ? '<button data-id="'+d.id+'">Quitar</button>' : ''}
+          `;
+          frag.appendChild(row);
+        });
+        membersWrap.appendChild(frag);
+
+        // Botones "Quitar"
+        if (isOwner) {
+          membersWrap.querySelectorAll('button[data-id]').forEach(btn => {
+            btn.onclick = async () => {
+              const id = btn.getAttribute('data-id');
+              if (!confirm('¿Quitar este miembro?')) return;
+              try {
+                await deleteDoc(doc(db, 'rooms', ROOM_ID, 'members', id));
+              } catch(e){ alert('No se pudo quitar: ' + (e?.message || e)); }
+            };
+          });
+        }
+      });
+    }
+
+    // --- Stream de chat ---
+    function startChatStream(){
+      const qMsgs = query(msgsRef, orderBy('createdAt', 'asc'), limit(500));
+      onSnapshot(qMsgs, (snap) => {
+        messagesEl.innerHTML = '';
+        const me = auth.currentUser?.uid;
+        snap.forEach(docSnap => {
+          const m = docSnap.data();
+          const id = docSnap.id;
+
+          const div = document.createElement('div');
+          div.className = 'msg' + (m.uid === me ? ' me' : '');
+
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+
+          const left = document.createElement('div');
+          left.style.display = 'flex'; left.style.gap = '8px'; left.style.alignItems = 'center';
+          const nameSpan = document.createElement('span');
+          nameSpan.textContent = m.name || 'Anónimo';
+          left.appendChild(nameSpan);
+          if (m.editedAt) {
+            const edited = document.createElement('span');
+            edited.className = 'edited';
+            edited.textContent = '(editado)';
+            left.appendChild(edited);
+          }
+          meta.appendChild(left);
+
+          if (m.uid === me) {
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+            const btnEdit = document.createElement('button');
+            btnEdit.className = 'btn-icon'; btnEdit.title = 'Editar'; btnEdit.textContent = '✎';
+            btnEdit.onclick = async () => {
+              const nuevo = prompt('Editar mensaje:', m.text || '');
+              if (nuevo === null) return;
+              const trimmed = nuevo.trim();
+              if (!trimmed) return alert('No puede quedar vacío.');
+              try {
+                await updateDoc(doc(db, 'rooms', ROOM_ID, 'messages', id), {
+                  text: trimmed, editedAt: serverTimestamp()
+                });
+              } catch(e){ alert('No se pudo editar: ' + (e?.message || e)); }
+            };
+            const btnDel = document.createElement('button');
+            btnDel.className = 'btn-icon'; btnDel.title = 'Eliminar'; btnDel.textContent = '✕';
+            btnDel.onclick = async () => {
+              if (!confirm('¿Eliminar este mensaje?')) return;
+              try { await deleteDoc(doc(db, 'rooms', ROOM_ID, 'messages', id)); }
+              catch(e){ alert('No se pudo eliminar: ' + (e?.message || e)); }
+            };
+            actions.appendChild(btnEdit); actions.appendChild(btnDel);
+            meta.appendChild(actions);
+          }
+
+          const body = document.createElement('div');
+          body.textContent = m.text || '';
+          div.appendChild(meta);
+          div.appendChild(body);
+          messagesEl.appendChild(div);
+        });
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      });
+    }
+
+    // --- Enviar ---
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const user = auth.currentUser;
+      if (!user) return alert('Inicia sesión');
+      if (!isMember) return alert('No eres miembro de esta sala.');
+
+      const text = input.value.trim();
+      if (!text) return;
+      try {
+        await addDoc(msgsRef, {
+          text, uid: user.uid, name: user.displayName || user.email, createdAt: serverTimestamp()
+        });
+        input.value = ''; input.focus();
+      } catch(e){ alert('No se pudo enviar: ' + (e?.message || e)); }
+    };
+  </script>
+</body>
+</html>
