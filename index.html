@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Nexus Chat PRO (lite)</title>
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b0b0e">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+<style>
+:root{--bg:#0b0b0e;--panel:#121216;--gold:#c7a24b;--muted:#9aa0a6}
+*{box-sizing:border-box} body{margin:0;font-family:system-ui,Arial;background:var(--bg);color:#f2f2f2}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--panel);border-bottom:1px solid #222}
+h1{margin:0;font-size:16px}
+#user{display:flex;gap:8px;align-items:center}
+#user img{width:28px;height:28px;border-radius:50%}
+.main{display:grid;grid-template-columns:280px 1fr;min-height:calc(100vh - 54px)}
+.aside{border-right:1px solid #222;background:#101015}
+.section{display:flex;flex-direction:column}
+.row{padding:10px;border-bottom:1px solid #222}
+select,input,button{border-radius:8px;border:1px solid #333;background:#141416;color:#fff;padding:8px}
+button{background:var(--gold);color:#000;border:0;font-weight:700;cursor:pointer}
+button:disabled{opacity:.6;cursor:not-allowed}
+.small{font-size:12px;color:var(--muted)}
+.list{padding:8px 10px}
+.item{padding:8px;border:1px solid #2a2a34;border-radius:8px;margin-bottom:8px;background:#141419;cursor:pointer}
+.item.active{border-color:var(--gold)}
+.flex{display:flex;gap:8px;align-items:center}
+.space{justify-content:space-between}
+.badge{background:#1e1e25;border:1px solid #2a2a34;padding:2px 8px;border-radius:999px;font-size:12px}
+label{font-size:12px;color:#c9c9ce}
+#messages{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:75%;padding:10px 12px;border-radius:10px;background:#1c1c21;border:1px solid #23232c;position:relative}
+.me{align-self:flex-end;background:#212129}
+.meta{font-size:12px;opacity:.85;margin-bottom:6px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+.meta .left{display:flex;gap:8px;align-items:center}
+.edited{font-size:11px;color:#9aa0a6}
+.actions{display:flex;gap:6px}
+.btn-icon{background:transparent;border:0;color:#bbb;cursor:pointer;padding:2px 6px;border-radius:6px}
+.btn-icon:hover{color:#fff;background:#2a2a2f}
+.typing{padding:6px 12px;color:#aaa;font-size:12px;min-height:22px}
+footer{border-top:1px solid #222;background:var(--panel);padding:10px}
+#composer{display:flex;gap:8px;align-items:center}
+#text{flex:1}
+.hidden{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>💬 Nexus Chat PRO</h1>
+  <div id="user" class="flex">
+    <button id="installBtn" class="hidden">Instalar</button>
+    <img id="avatar" alt="">
+    <span id="username" class="small"></span>
+    <button id="loginBtn">Entrar</button>
+    <button id="logoutBtn" class="hidden">Salir</button>
+  </div>
+</header>
+
+<div class="main">
+  <!-- Sidebar -->
+  <aside class="aside">
+    <div class="row">
+      <div class="flex space">
+        <strong>Salas</strong><span class="small">públicas/privadas</span>
+      </div>
+      <div class="flex" style="margin-top:8px">
+        <input id="roomName" placeholder="Nombre sala" style="flex:1">
+        <select id="roomMode">
+          <option value="public">pública</option>
+          <option value="private">privada</option>
+        </select>
+        <button id="createRoomBtn">Crear</button>
+      </div>
+    </div>
+    <div class="list" id="roomsList"></div>
+
+    <div class="row" id="membersTools" style="display:none">
+      <div class="flex space">
+        <strong>Miembros</strong> <span class="badge" id="roleBadge">—</span>
+      </div>
+      <div class="flex" style="margin-top:8px">
+        <input id="inviteEmail" type="email" placeholder="Añadir (email)" style="flex:1">
+        <button id="inviteBtn">Añadir</button>
+      </div>
+      <div class="list" id="membersList" style="max-height:30vh;overflow:auto"></div>
+    </div>
+  </aside>
+
+  <!-- Chat -->
+  <section class="section">
+    <div class="row flex space">
+      <div class="flex" style="gap:12px">
+        <div><strong id="roomTitle">Sala: —</strong> <span id="roomModeBadge" class="badge">—</span></div>
+      </div>
+      <div class="small">Doble clic para editar tu mensaje</div>
+    </div>
+
+    <div id="messages"></div>
+    <div class="typing" id="typingIndicator"></div>
+
+    <footer>
+      <div id="composer">
+        <input id="text" placeholder="Escribe un mensaje…">
+        <button id="sendBtn" disabled>Enviar</button>
+      </div>
+    </footer>
+  </section>
+</div>
+
+<!-- Firebase CDN v11 -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+import {
+  getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, limit,
+  doc, updateDoc, deleteDoc, setDoc, getDoc, getDocs, where
+} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+
+// === CONFIG (tu proyecto) ===
+const firebaseConfig = {
+  apiKey: "AIzaSyCp23981tPx3DsXvPyK4ZeAfkFPb3pL6pU",
+  authDomain: "nexus-chat-7e32b.firebaseapp.com",
+  projectId: "nexus-chat-7e32b",
+  storageBucket: "nexus-chat-7e32b.appspot.com",
+  messagingSenderId: "780849892655",
+  appId: "1:780849892655:web:b329ad45dffb7931f3a5da"
+};
+
+// === Init ===
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// === UI refs ===
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const avatar = document.getElementById('avatar');
+const username = document.getElementById('username');
+
+const roomName = document.getElementById('roomName');
+const roomMode = document.getElementById('roomMode');
+const createRoomBtn = document.getElementById('createRoomBtn');
+const roomsList = document.getElementById('roomsList');
+
+const membersTools = document.getElementById('membersTools');
+const roleBadge = document.getElementById('roleBadge');
+const inviteEmail = document.getElementById('inviteEmail');
+const inviteBtn = document.getElementById('inviteBtn');
+const membersList = document.getElementById('membersList');
+
+const roomTitle = document.getElementById('roomTitle');
+const roomModeBadge = document.getElementById('roomModeBadge');
+
+const messagesEl = document.getElementById('messages');
+const text = document.getElementById('text');
+const sendBtn = document.getElementById('sendBtn');
+const typingIndicator = document.getElementById('typingIndicator');
+
+const provider = new GoogleAuthProvider();
+const emailId = (e)=> e.toLowerCase().replace(/\./g, ',');
+
+let currentRoomId = null;
+let currentRoom = null;
+let isOwner = false;
+let isMember = false;
+let unsubMessages = null;
+let unsubTyping = null;
+let typingTimer = null;
+
+// Auth
+loginBtn.onclick = ()=>signInWithPopup(auth, provider);
+logoutBtn.onclick = ()=>signOut(auth);
+
+onAuthStateChanged(auth, async (user)=>{
+  if(user){
+    loginBtn.classList.add('hidden');
+    logoutBtn.classList.remove('hidden');
+    avatar.src = user.photoURL || '';
+    username.textContent = user.displayName || user.email;
+    await loadRooms();
+  }else{
+    loginBtn.classList.remove('hidden');
+    logoutBtn.classList.add('hidden');
+    avatar.removeAttribute('src');
+    username.textContent = '';
+    roomsList.innerHTML = '';
+    clearRoom();
+  }
+});
+
+// Crear sala
+createRoomBtn.onclick = async ()=>{
+  const name = roomName.value.trim();
+  if(!name) return alert('Nombre de sala requerido.');
+  const mode = roomMode.value; // public | private
+  const user = auth.currentUser;
+  if(!user) return alert('Inicia sesión.');
+
+  const roomId = name.toLowerCase().replace(/\s+/g,'-');
+  const roomRef = doc(db, 'rooms', roomId);
+  const r = await getDoc(roomRef);
+  if(r.exists()) return alert('Ya existe una sala con ese nombre.');
+
+  await setDoc(roomRef, {
+    roomId, name, mode, ownerUid: user.uid, ownerEmail: user.email,
+    createdAt: serverTimestamp()
+  });
+
+  if(mode==='private'){
+    await setDoc(doc(db, 'rooms', roomId, 'members', emailId(user.email)), {
+      email: user.email,
+      name: user.displayName || user.email,
+      createdAt: serverTimestamp()
+    });
+  }
+
+  roomName.value='';
+  await loadRooms();
+  await enterRoom(roomId);
+};
+
+// Listar salas (simples: últimas 50 por creación)
+async function loadRooms(){
+  roomsList.innerHTML='';
+  const qRooms = query(collection(db,'rooms'), limit(50));
+  const snap = await getDocs(qRooms);
+  snap.forEach(d=>{
+    const r = d.data();
+    const div = document.createElement('div');
+    div.className = 'item'+(currentRoomId===r.roomId?' active':'');
+    div.innerHTML = `<div class="flex space"><span>• ${r.name}</span><span class="badge">${r.mode}</span></div>`;
+    div.onclick = ()=> enterRoom(r.roomId);
+    roomsList.appendChild(div);
+  });
+}
+
+// Entrar a una sala
+async function enterRoom(roomId){
+  const user = auth.currentUser;
+  if(!user) return alert('Inicia sesión');
+
+  // Limpia listeners anteriores
+  if(unsubMessages) {unsubMessages(); unsubMessages=null;}
+  if(unsubTyping) {unsubTyping(); unsubTyping=null;}
+  clearRoom();
+
+  currentRoomId = roomId;
+
+  const roomRef = doc(db,'rooms', roomId);
+  const roomSnap = await getDoc(roomRef);
+  if(!roomSnap.exists()){ alert('La sala no existe.'); return; }
+  currentRoom = roomSnap.data();
+
+  // Rol
+  isOwner = (currentRoom.ownerUid === user.uid);
+  if(currentRoom.mode==='public'){
+    isMember = true;
+  }else{
+    const me = await getDoc(doc(db,'rooms',roomId,'members', emailId(user.email)));
+    isMember = me.exists() || isOwner;
+  }
+
+  // UI
+  roomTitle.textContent = `Sala: ${currentRoom.name}`;
+  roomModeBadge.textContent = currentRoom.mode;
+  roleBadge.textContent = isOwner ? 'Owner' : (isMember?'Miembro':'Invitado');
+  membersTools.style.display = (currentRoom.mode==='private' && isOwner) ? 'block' : 'none';
+  sendBtn.disabled = !isMember;
+  text.disabled = !isMember;
+
+  // Stream mensajes
+  const msgsRef = collection(db,'rooms',roomId,'messages');
+  const qMsgs = query(msgsRef, orderBy('createdAt','asc'), limit(500));
+  unsubMessages = onSnapshot(qMsgs, (snap)=>{
+    messagesEl.innerHTML='';
+    const me = auth.currentUser?.uid;
+    snap.forEach(ds=>{
+      const m = ds.data(); const id = ds.id;
+      const li = document.createElement('div');
+      li.className = 'msg'+(m.uid===me?' me':'');
+      const meta = document.createElement('div');
+      meta.className='meta';
+      meta.innerHTML = `<div class="left"><span>${m.name||'Anónimo'}</span>${m.editedAt?'<span class="edited">(editado)</span>':''}</div>`;
+      if(m.uid===me){
+        const act = document.createElement('div'); act.className='actions';
+        const b1 = document.createElement('button'); b1.className='btn-icon'; b1.textContent='✎'; b1.title='Editar';
+        b1.onclick = async ()=>{
+          const nuevo = prompt('Editar mensaje:', m.text||''); if(nuevo===null) return;
+          const t = nuevo.trim(); if(!t) return alert('No puede quedar vacío.');
+          await updateDoc(doc(db,'rooms',roomId,'messages',id), { text:t, editedAt: serverTimestamp() });
+        };
+        const b2 = document.createElement('button'); b2.className='btn-icon'; b2.textContent='✕'; b2.title='Eliminar';
+        b2.onclick = async ()=>{ if(confirm('¿Eliminar?')) await deleteDoc(doc(db,'rooms',roomId,'messages',id)); };
+        act.appendChild(b1); act.appendChild(b2); meta.appendChild(act);
+      }
+      const body = document.createElement('div'); body.textContent = m.text || '';
+      li.appendChild(meta); li.appendChild(body);
+      messagesEl.appendChild(li);
+    });
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+
+  // Typing indicator (Firestore, sin RTDB)
+  const typingRef = collection(db,'rooms',roomId,'typing');
+  unsubTyping = onSnapshot(typingRef, (snap)=>{
+    const now = Date.now();
+    const names = [];
+    snap.forEach(ds=>{
+      const t = ds.data();
+      if(!t || !t.ts) return;
+      if(now - t.ts <= 4000 && t.uid !== auth.currentUser?.uid){
+        names.push(t.name || 'Alguien');
+      }
+    });
+    typingIndicator.textContent = names.length ? `${names.join(', ')} está escribiendo…` : '';
+  });
+
+  // Configurar entrada
+  text.oninput = ()=>{
+    heartbeatTyping();
+  };
+}
+
+// limpiar UI de sala
+function clearRoom(){
+  currentRoomId = null;
+  currentRoom = null;
+  isOwner = false;
+  isMember = false;
+  roomTitle.textContent = 'Sala: —';
+  roomModeBadge.textContent = '—';
+  roleBadge.textContent = '—';
+  membersList.innerHTML = '';
+  membersTools.style.display = 'none';
+  messagesEl.innerHTML = '';
+  typingIndicator.textContent = '';
+  sendBtn.disabled = true;
+  text.value = '';
+  text.disabled = true;
+}
+
+// Enviar mensaje
+document.getElementById('sendBtn').onclick = async ()=>{
+  if(!auth.currentUser || !currentRoomId || !isMember) return;
+  const t = text.value.trim(); if(!t) return;
+  await addDoc(collection(db,'rooms',currentRoomId,'messages'),{
+    text: t,
+    uid: auth.currentUser.uid,
+    name: auth.currentUser.displayName || auth.currentUser.email,
+    createdAt: serverTimestamp()
+  });
+  text.value=''; heartbeatTyping(true);
+};
+
+// Typing heartbeat en Firestore (doc por usuario)
+async function heartbeatTyping(clear=false){
+  if(!auth.currentUser || !currentRoomId) return;
+  const myDoc = doc(db,'rooms',currentRoomId,'typing', auth.currentUser.uid);
+  if(clear){
+    // borra tu rastro
+    await setDoc(myDoc, { uid: auth.currentUser.uid, name: auth.currentUser.displayName || auth.currentUser.email, ts: 0 }, { merge:true });
+    return;
+  }
+  await setDoc(myDoc, {
+    uid: auth.currentUser.uid,
+    name: auth.currentUser.displayName || auth.currentUser.email,
+    ts: Date.now()
+  }, { merge:true });
+
+  if(typingTimer) clearTimeout(typingTimer);
+  typingTimer = setTimeout(()=>setDoc(myDoc,{ts:0},{merge:true}), 4000);
+}
+
+// Miembros (solo owner en salas privadas)
+inviteBtn.onclick = async ()=>{
+  if(!isOwner || !currentRoomId) return alert('Solo el owner puede añadir.');
+  const email = inviteEmail.value.trim().toLowerCase(); if(!email) return;
+  await setDoc(doc(db,'rooms',currentRoomId,'members', emailId(email)),{
+    email, name: email, createdAt: serverTimestamp()
+  });
+  inviteEmail.value='';
+  await renderMembers();
+};
+
+async function renderMembers(){
+  if(!currentRoomId) return;
+  membersList.innerHTML='';
+  const snap = await getDocs(collection(db,'rooms',currentRoomId,'members'));
+  snap.forEach(d=>{
+    const m = d.data();
+    const row = document.createElement('div'); row.className='item';
+    row.innerHTML = `<div class="flex space"><span>${m.name||m.email}</span>${isOwner?'<button data-id="'+d.id+'">Quitar</button>':''}</div>`;
+    membersList.appendChild(row);
+  });
+  if(isOwner){
+    membersList.querySelectorAll('button[data-id]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        if(confirm('¿Quitar miembro?')){
+          await deleteDoc(doc(db,'rooms',currentRoomId,'members', btn.dataset.id));
+          await renderMembers();
+        }
+      };
+    });
+  }
+}
+
+// cuando entres a una sala privada y seas owner, carga miembros
+membersTools.addEventListener('transitionend', renderMembers);
+document.addEventListener('click', (e)=>{
+  if(e.target===membersTools) renderMembers();
+});
+
+// Cargar salas al inicio si ya estás logueado
+if(auth.currentUser){ loadRooms(); }
+
+// PWA
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js');
+  let dp=null;
+  const installBtn=document.getElementById('installBtn');
+  window.addEventListener('beforeinstallprompt',(e)=>{e.preventDefault();dp=e;installBtn.classList.remove('hidden');});
+  installBtn.onclick=async()=>{if(!dp) return; dp.prompt(); await dp.userChoice; installBtn.classList.add('hidden'); dp=null;};
+  window.addEventListener('appinstalled',()=>installBtn.classList.add('hidden'));
+}
+</script>
+</body>
+</html>
