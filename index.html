@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nexus Chat</title>
+<style>
+:root{--bg:#0b0b0e;--panel:#121216;--gold:#c7a24b}
+body{margin:0;font-family:Arial;background:var(--bg);color:white}
+header{background:var(--panel);padding:10px;display:flex;justify-content:space-between;align-items:center}
+#user img{width:32px;height:32px;border-radius:50%;margin-right:8px}
+main{height:calc(100vh - 130px);overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.msg{background:#1c1c21;padding:8px;border-radius:8px;max-width:75%}
+.me{align-self:flex-end;background:#23232d}
+.meta{font-size:11px;opacity:.7;margin-bottom:4px}
+.actions{font-size:12px;margin-top:4px}
+button{padding:8px;border:0;border-radius:6px;background:var(--gold);font-weight:bold;cursor:pointer}
+form{display:flex;padding:10px;background:var(--panel);gap:6px}
+input{flex:1;padding:8px;border-radius:6px;border:1px solid #333;background:#121216;color:white}
+.btn-icon{background:none;color:#ccc;border:0;cursor:pointer;font-size:12px}
+.btn-icon:hover{color:white}
+</style>
+</head>
+<body>
+
+<header>
+  <div id="user"><span>Desconectado</span></div>
+  <button id="login">Entrar</button>
+  <button id="logout" style="display:none">Salir</button>
+</header>
+
+<main id="messages"></main>
+
+<form id="sendForm">
+  <input id="msgInput" placeholder="Mensaje..." autocomplete="off">
+  <button type="submit">Enviar</button>
+</form>
+
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+import {getAuth,GoogleAuthProvider,signInWithPopup,signOut,onAuthStateChanged}
+from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+import {
+ getFirestore,collection,addDoc,serverTimestamp,
+ onSnapshot,query,orderBy,doc,updateDoc,deleteDoc
+} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+
+// Tu Firebase config
+const firebaseConfig = {
+ apiKey: "AIzaSyCp23981tPx3DsXvPyK4ZeAfkFPb3pL6pU",
+ authDomain: "nexus-chat-7e32b.firebaseapp.com",
+ projectId: "nexus-chat-7e32b",
+ storageBucket: "nexus-chat-7e32b.appspot.com",
+ messagingSenderId: "780849892655",
+ appId: "1:780849892655:web:b329ad45dffb7931f3a5da"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth();
+const db = getFirestore();
+
+const loginBtn = document.getElementById("login");
+const logoutBtn = document.getElementById("logout");
+const userDiv = document.getElementById("user");
+const messagesDiv = document.getElementById("messages");
+const sendForm = document.getElementById("sendForm");
+const msgInput = document.getElementById("msgInput");
+
+const provider = new GoogleAuthProvider();
+
+loginBtn.onclick = ()=>signInWithPopup(auth,provider);
+logoutBtn.onclick = ()=>signOut(auth);
+
+onAuthStateChanged(auth,user=>{
+ if(user){
+   userDiv.innerHTML = `<img src="${user.photoURL}"> ${user.displayName}`;
+   loginBtn.style.display = "none";
+   logoutBtn.style.display = "inline-block";
+   loadMessages();
+ }else{
+   userDiv.innerHTML = "Desconectado";
+   loginBtn.style.display = "inline-block";
+   logoutBtn.style.display = "none";
+ }
+});
+
+function loadMessages(){
+ const ref = collection(db,"rooms","global","messages");
+ const q = query(ref,orderBy("createdAt"));
+
+ onSnapshot(q,snap=>{
+   messagesDiv.innerHTML="";
+   snap.forEach(d=>{
+     const m = d.data(); const id = d.id;
+     const mine = m.uid===auth.currentUser?.uid;
+     const div = document.createElement("div");
+     div.className = "msg"+(mine?" me":"");
+     div.innerHTML = `
+       <div class="meta">${m.name||"?"}</div>
+       ${m.text}
+       ${mine?`
+       <div class="actions">
+         <button class="btn-icon" onclick="editMsg('${id}','${m.text}')">Editar</button>
+         <button class="btn-icon" onclick="delMsg('${id}')">Borrar</button>
+       </div>`:""}
+     `;
+     messagesDiv.appendChild(div);
+   });
+   messagesDiv.scrollTop = messagesDiv.scrollHeight;
+ });
+}
+
+window.editMsg = async(id,txt)=>{
+ const nuevo = prompt("Editar:",txt);
+ if(!nuevo) return;
+ await updateDoc(doc(db,"rooms","global","messages",id),{text:nuevo});
+};
+
+window.delMsg = async(id)=>{
+ if(confirm("¿Borrar?")){
+   await deleteDoc(doc(db,"rooms","global","messages",id));
+ }
+};
+
+sendForm.onsubmit = async e=>{
+ e.preventDefault();
+ const text = msgInput.value.trim();
+ if(!text || !auth.currentUser) return;
+ await addDoc(collection(db,"rooms","global","messages"),{
+   text, uid:auth.currentUser.uid,
+   name:auth.currentUser.displayName,
+   createdAt:serverTimestamp()
+ });
+ msgInput.value="";
+};
+</script>
+
+</body>
+</html>
