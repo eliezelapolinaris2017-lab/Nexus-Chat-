@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Nexus Chat PRO</title>
+<style>
+  :root{
+    --bg:#0b0b0e; --panel:#111118; --panel2:#0e0e13;
+    --gold:#c7a24b; --line:#20202a; --muted:#9aa0a6;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:system-ui,Segoe UI,Arial;background:var(--bg);color:#f4f4f4}
+
+  /* Header */
+  header{
+    position:sticky; top:0; z-index:30;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 14px; background:var(--panel); border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand h1{margin:0;font-size:16px;font-weight:700}
+  .hamb{display:none;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#171720;color:#fff;cursor:pointer}
+  .user{display:flex;align-items:center;gap:10px}
+  .user img{width:28px;height:28px;border-radius:50%}
+  .btn{border:0;background:var(--gold);color:#000;padding:8px 12px;border-radius:8px;font-weight:700;cursor:pointer}
+  .btn.muted{background:#23232d;color:#ddd;border:1px solid var(--line)}
+  .badge{background:#1b1b24;border:1px solid var(--line);padding:2px 8px;border-radius:999px;font-size:12px;color:#ddd}
+
+  /* Layout */
+  .wrap{
+    height:calc(100% - 54px); /* header ~54px */
+    display:grid; grid-template-columns:320px 1fr;
+  }
+  aside{
+    background:var(--panel2); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; min-width:280px;
+  }
+  .aside-head{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .label{font-size:12px;color:var(--muted);margin-bottom:6px}
+  .row{display:flex;gap:8px}
+  input,select{width:100%;padding:10px;border-radius:10px;border:1px solid #2b2b36;background:#14141a;color:#fff}
+  .list{padding:12px 10px 16px; overflow:auto}
+  .room{padding:10px;border-radius:10px;border:1px solid #232332;background:#141419;margin-bottom:10px;cursor:pointer}
+  .room.active{border-color:var(--gold)}
+  .room .top{display:flex;justify-content:space-between;align-items:center}
+  .chip{font-size:12px;border:1px solid var(--line);padding:2px 8px;border-radius:999px;background:#1a1a22}
+
+  .members{border-top:1px solid var(--line)}
+  .member-row{padding:8px 10px;border-bottom:1px dashed #242432;display:flex;justify-content:space-between;align-items:center}
+  .member-row button{background:#242432;border:0;color:#ddd;border-radius:6px;padding:4px 8px;cursor:pointer}
+
+  main{display:flex;flex-direction:column;height:100%}
+  .chat-head{padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .chat-head .sub{color:var(--muted);font-size:12px}
+  #messages{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:#0a0a0f}
+  .msg{max-width:78%;background:#1a1a22;border:1px solid #232332;padding:10px 12px;border-radius:12px}
+  .me{align-self:flex-end;background:#23232f}
+  .meta{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#cfcfd6;margin-bottom:4px}
+  .edited{font-size:11px;color:var(--muted)}
+  .actions{display:flex;gap:6px}
+  .ico{background:transparent;border:0;color:#bbb;padding:2px 6px;border-radius:6px;cursor:pointer}
+  .ico:hover{background:#2a2a34;color:#fff}
+  #typing{min-height:20px;color:#aaa;font-size:12px;padding:4px 16px}
+
+  .composer{position:sticky;bottom:0;display:flex;gap:8px;align-items:center;padding:12px;border-top:1px solid var(--line);background:var(--panel)}
+  #text{flex:1}
+
+  /* Mobile */
+  @media (max-width: 900px){
+    .wrap{grid-template-columns:1fr}
+    aside{
+      position:fixed; z-index:40; top:54px; bottom:0; left:0; width:78vw; max-width:360px;
+      transform:translateX(-100%); transition:transform .25s ease;
+      box-shadow: 24px 0 40px rgba(0,0,0,.35);
+    }
+    aside.open{transform:translateX(0)}
+    .hamb{display:inline-block}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <button id="hamb" class="hamb">☰</button>
+    <h1>💬 Nexus Chat PRO</h1>
+  </div>
+  <div class="user">
+    <span id="roleBadge" class="badge">—</span>
+    <img id="avatar" alt="" />
+    <span id="username" class="badge">—</span>
+    <button id="loginBtn" class="btn">Entrar</button>
+    <button id="logoutBtn" class="btn muted" style="display:none">Salir</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="aside-head">
+      <div class="label">Crear sala</div>
+      <div class="row" style="margin-bottom:8px">
+        <input id="roomName" placeholder="Nombre (ej. Familia)">
+      </div>
+      <div class="row">
+        <select id="roomMode">
+          <option value="public">pública</option>
+          <option value="private">privada</option>
+        </select>
+        <button id="createRoomBtn" class="btn" style="white-space:nowrap">Crear</button>
+      </div>
+    </div>
+
+    <div class="aside-head" style="border-top:1px solid var(--line)">
+      <div class="label">Salas</div>
+    </div>
+    <div id="roomsList" class="list" style="flex:1"></div>
+
+    <div class="aside-head members">
+      <div class="label">Miembros (solo salas privadas / owner)</div>
+      <div class="row" style="margin-bottom:8px">
+        <input id="inviteEmail" type="email" placeholder="correo@dominio.com">
+        <button id="inviteBtn" class="btn">Añadir</button>
+      </div>
+    </div>
+    <div id="membersList" class="list" style="max-height:30vh"></div>
+  </aside>
+
+  <!-- Chat -->
+  <main>
+    <div class="chat-head">
+      <div id="roomTitle"><strong>Sala: —</strong></div>
+      <div class="sub" id="roomSub">Selecciona una sala o crea una nueva</div>
+    </div>
+
+    <div id="messages"></div>
+    <div id="typing"></div>
+
+    <div class="composer">
+      <input id="text" placeholder="Escribe un mensaje…" disabled>
+      <button id="sendBtn" class="btn" disabled>Enviar</button>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+/* ================= Firebase ================= */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+import {
+  getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, limit,
+  doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc
+} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCp23981tPx3DsXvPyK4ZeAfkFPb3pL6pU",
+  authDomain: "nexus-chat-7e32b.firebaseapp.com",
+  projectId: "nexus-chat-7e32b",
+  storageBucket: "nexus-chat-7e32b.appspot.com",
+  messagingSenderId: "780849892655",
+  appId: "1:780849892655:web:b329ad45dffb7931f3a5da"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+/* ================= UI refs ================= */
+const hamb = document.getElementById('hamb');
+const sidebar = document.getElementById('sidebar');
+
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn= document.getElementById('logoutBtn');
+const avatar   = document.getElementById('avatar');
+const username = document.getElementById('username');
+const roleBadge= document.getElementById('roleBadge');
+
+const roomName = document.getElementById('roomName');
+const roomMode = document.getElementById('roomMode');
+const createRoomBtn = document.getElementById('createRoomBtn');
+const roomsList = document.getElementById('roomsList');
+
+const inviteEmail = document.getElementById('inviteEmail');
+const inviteBtn = document.getElementById('inviteBtn');
+const membersList = document.getElementById('membersList');
+
+const roomTitle = document.getElementById('roomTitle');
+const roomSub   = document.getElementById('roomSub');
+
+const messagesEl= document.getElementById('messages');
+const typingEl  = document.getElementById('typing');
+const text      = document.getElementById('text');
+const sendBtn   = document.getElementById('sendBtn');
+
+/* ================= State ================= */
+const provider = new GoogleAuthProvider();
+const emailId = e => e.toLowerCase().replace(/\./g, ',');
+let currentRoomId=null, currentRoom=null, isOwner=false, isMember=false;
+let unsubMsgs=null, unsubTyping=null;
+
+/* ================= Auth ================= */
+loginBtn.onclick = ()=>signInWithPopup(auth, provider);
+logoutBtn.onclick= ()=>signOut(auth);
+
+onAuthStateChanged(auth, async user=>{
+  if(user){
+    loginBtn.style.display='none';
+    logoutBtn.style.display='inline-block';
+    avatar.src = user.photoURL || '';
+    username.textContent = user.displayName || user.email;
+    await loadRooms();
+  }else{
+    loginBtn.style.display='inline-block';
+    logoutBtn.style.display='none';
+    avatar.removeAttribute('src');
+    username.textContent = '—';
+    roomsList.innerHTML = '';
+    clearRoom();
+  }
+});
+
+/* ================= Sidebar toggle (mobile) ================= */
+hamb.onclick = ()=> sidebar.classList.toggle('open');
+
+/* ================= Rooms ================= */
+async function loadRooms(){
+  roomsList.innerHTML='';
+  const qRooms = query(collection(db,'rooms'), limit(100));
+  const snap = await getDocs(qRooms);
+  snap.forEach(d=>{
+    const r = d.data();
+    const item = document.createElement('div');
+    item.className = 'room' + (currentRoomId===r.roomId?' active':'');
+    item.innerHTML = `
+      <div class="top">
+        <strong>• ${r.name}</strong>
+        <span class="chip">${r.mode||'public'}</span>
+      </div>`;
+    item.onclick = ()=>enterRoom(r.roomId);
+    roomsList.appendChild(item);
+  });
+}
+
+createRoomBtn.onclick = async ()=>{
+  const name = (roomName.value||'').trim();
+  const mode = roomMode.value;
+  const user = auth.currentUser;
+  if(!user) return alert('Inicia sesión.');
+  if(!name) return alert('Nombre requerido.');
+
+  const roomId = name.toLowerCase().replace(/\s+/g,'-');
+  const ref = doc(db,'rooms',roomId);
+  if((await getDoc(ref)).exists()) return alert('Ya existe esa sala.');
+
+  await setDoc(ref,{
+    roomId, name, mode, ownerUid:user.uid, ownerEmail:user.email, createdAt:serverTimestamp()
+  });
+  if(mode==='private'){
+    await setDoc(doc(db,'rooms',roomId,'members', emailId(user.email)),{
+      email:user.email, name:user.displayName||user.email, createdAt:serverTimestamp()
+    });
+  }
+  roomName.value='';
+  await loadRooms();
+  await enterRoom(roomId);
+};
+
+async function enterRoom(roomId){
+  const user = auth.currentUser; if(!user) return;
+  if(unsubMsgs){unsubMsgs();unsubMsgs=null}
+  if(unsubTyping){unsubTyping();unsubTyping=null}
+
+  currentRoomId = roomId;
+  const rs = await getDoc(doc(db,'rooms',roomId));
+  if(!rs.exists()) return alert('La sala no existe.');
+  currentRoom = rs.data();
+
+  isOwner = currentRoom.ownerUid === user.uid;
+  if(currentRoom.mode==='public'){
+    isMember = true;
+  } else {
+    const me = await getDoc(doc(db,'rooms',roomId,'members', emailId(user.email)));
+    isMember = me.exists() || isOwner;
+  }
+
+  roleBadge.textContent = isOwner ? 'Owner' : (isMember ? 'Miembro' : 'Invitado');
+  roomTitle.innerHTML = `<strong>Sala: ${currentRoom.name}</strong>`;
+  roomSub.textContent = currentRoom.mode==='public'
+    ? 'Cualquiera con login puede escribir.'
+    : (isOwner ? 'Privada • Puedes añadir/quitar miembros.' : (isMember ? 'Privada' : 'Privada • No eres miembro.'));
+
+  // habilitar/deshabilitar UI
+  text.disabled = !isMember; sendBtn.disabled = !isMember;
+  inviteEmail.disabled = !(currentRoom.mode==='private' && isOwner);
+  inviteBtn.disabled = !(currentRoom.mode==='private' && isOwner);
+  membersList.innerHTML = '';
+
+  // stream mensajes
+  const msgsRef = collection(db,'rooms',roomId,'messages');
+  const qMsgs = query(msgsRef, orderBy('createdAt','asc'), limit(500));
+  unsubMsgs = onSnapshot(qMsgs, snap=>{
+    messagesEl.innerHTML='';
+    const me = auth.currentUser?.uid;
+    snap.forEach(ds=>{
+      const m = ds.data(); const id = ds.id;
+      const bubble = document.createElement('div');
+      bubble.className = 'msg'+(m.uid===me?' me':'');
+      const meta = document.createElement('div'); meta.className='meta';
+      meta.innerHTML = `<span>${m.name||'Anónimo'} ${m.editedAt?'<span class="edited">(editado)</span>':''}</span>`;
+      if(m.uid===me){
+        const act=document.createElement('div'); act.className='actions';
+        const b1=document.createElement('button'); b1.className='ico'; b1.title='Editar'; b1.textContent='✎';
+        b1.onclick=async()=>{
+          const nuevo=prompt('Editar mensaje:',m.text||''); if(nuevo===null) return;
+          const t=nuevo.trim(); if(!t) return alert('No puede quedar vacío.');
+          await updateDoc(doc(db,'rooms',roomId,'messages',id),{text:t,editedAt:serverTimestamp()});
+        };
+        const b2=document.createElement('button'); b2.className='ico'; b2.title='Eliminar'; b2.textContent='✕';
+        b2.onclick=async()=>{ if(confirm('¿Eliminar?')) await deleteDoc(doc(db,'rooms',roomId,'messages',id)); };
+        act.appendChild(b1); act.appendChild(b2); meta.appendChild(act);
+      }
+      const body=document.createElement('div'); body.textContent=m.text||'';
+      bubble.appendChild(meta); bubble.appendChild(body);
+      bubble.ondblclick=async()=>{ if(m.uid!==me) return; const nv=prompt('Editar:',m.text||''); if(nv===null) return; const t=nv.trim(); if(!t) return; await updateDoc(doc(db,'rooms',roomId,'messages',id),{text:t,editedAt:serverTimestamp()}); };
+      messagesEl.appendChild(bubble);
+    });
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+
+  // typing indicator (doc por usuario)
+  const typingRef = collection(db,'rooms',roomId,'typing');
+  unsubTyping = onSnapshot(typingRef, snap=>{
+    const now=Date.now(); const names=[];
+    snap.forEach(d=>{
+      const t=d.data(); if(!t?.ts) return;
+      if(now - t.ts < 4000 && t.uid !== auth.currentUser?.uid) names.push(t.name||'Alguien');
+    });
+    typingEl.textContent = names.length ? `${names.join(', ')} está escribiendo…` : '';
+  });
+
+  // si es privada y eres owner, pinta miembros
+  if(currentRoom.mode==='private' && isOwner){ await renderMembers(); }
+  // cerrar sidebar en móvil
+  sidebar.classList.remove('open');
+}
+
+function clearRoom(){
+  currentRoomId=null; currentRoom=null; isOwner=false; isMember=false;
+  roleBadge.textContent='—';
+  roomTitle.innerHTML='<strong>Sala: —</strong>'; roomSub.textContent='Selecciona una sala o crea una nueva';
+  messagesEl.innerHTML=''; typingEl.textContent='';
+  text.value=''; text.disabled=true; sendBtn.disabled=true;
+  membersList.innerHTML='';
+}
+
+/* ================= Mensajería ================= */
+sendBtn.onclick = async ()=>{
+  if(!auth.currentUser || !currentRoomId || !isMember) return;
+  const t = text.value.trim(); if(!t) return;
+  await addDoc(collection(db,'rooms',currentRoomId,'messages'),{
+    text:t, uid:auth.currentUser.uid, name:auth.currentUser.displayName||auth.currentUser.email, createdAt:serverTimestamp()
+  });
+  text.value=''; heartbeat(true);
+};
+
+let typingTimer=null;
+text.addEventListener('input', ()=>heartbeat(false));
+async function heartbeat(clear){
+  if(!auth.currentUser || !currentRoomId) return;
+  const ref = doc(db,'rooms',currentRoomId,'typing', auth.currentUser.uid);
+  if(clear){ await setDoc(ref,{ts:0},{merge:true}); return; }
+  await setDoc(ref,{uid:auth.currentUser.uid,name:auth.currentUser.displayName||auth.currentUser.email,ts:Date.now()},{merge:true});
+  if(typingTimer) clearTimeout(typingTimer);
+  typingTimer=setTimeout(()=>setDoc(ref,{ts:0},{merge:true}), 3500);
+}
+
+/* ================= Miembros (owner) ================= */
+inviteBtn.onclick = async ()=>{
+  if(!isOwner || !currentRoomId) return alert('Solo el owner puede añadir.');
+  const email = inviteEmail.value.trim().toLowerCase(); if(!email) return;
+  await setDoc(doc(db,'rooms',currentRoomId,'members', emailId(email)),{
+    email, name: email, createdAt: serverTimestamp()
+  });
+  inviteEmail.value=''; await renderMembers();
+};
+async function renderMembers(){
+  membersList.innerHTML='';
+  const snap=await getDocs(collection(db,'rooms',currentRoomId,'members'));
+  snap.forEach(d=>{
+    const m=d.data();
+    const row=document.createElement('div'); row.className='member-row';
+    row.innerHTML=`<span>${m.name||m.email}</span><button data-id="${d.id}">Quitar</button>`;
+    membersList.appendChild(row);
+  });
+  membersList.querySelectorAll('button[data-id]').forEach(b=>{
+    b.onclick=async()=>{ if(confirm('¿Quitar?')){ await deleteDoc(doc(db,'rooms',currentRoomId,'members', b.dataset.id)); await renderMembers(); } };
+  });
+}
+</script>
+</body>
+</html>
